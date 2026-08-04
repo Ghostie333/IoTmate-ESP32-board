@@ -3,42 +3,56 @@
 
 void RelayManager::begin()
 {
-    pinMode(RELAY_1_PIN, OUTPUT);
-    pinMode(RELAY_2_PIN, OUTPUT);
+    // Pin for Wifi reset
+    pinMode(RESET_PIN, INPUT_PULLUP);
+
+    // Relays pins
+    for (uint8_t i = 0; i < NUM_RELAYS; i++)
+    {
+        pinMode(_relayPins[i], OUTPUT);
+    }
+
     updateHardwarePins();
 }
 
 void RelayManager::setRelay(uint8_t relayNum, bool state)
 {
-    if (relayNum == 1)
-    {
-        _relay1State = state;
-    }
-    else if (relayNum == 2)
-    {
-        _relay2State = state;
-    }
+    // Accept 1..NUM_RELAYS numbers
+    if (relayNum < 1 || relayNum > NUM_RELAYS)
+        return;
+
+    _relaysState[relayNum - 1] = state;
     updateHardwarePins();
 }
 
 bool RelayManager::getRelayState(uint8_t relayNum) const
 {
-    if (relayNum == 1)
-        return _relay1State;
-    if (relayNum == 2)
-        return _relay2State;
-    return false;
+    if (relayNum < 1 || relayNum > NUM_RELAYS)
+        return false;
+
+    return _relaysState[relayNum - 1];
 }
 
 void RelayManager::updateHardwarePins()
 {
-    digitalWrite(RELAY_1_PIN, _relay1State ? HIGH : LOW);
-    digitalWrite(RELAY_2_PIN, _relay2State ? HIGH : LOW);
+    for (uint8_t i = 0; i < NUM_RELAYS; i++)
+    {
+        digitalWrite(_relayPins[i], _relaysState[i] ? HIGH : LOW);
+    }
 }
 
 String RelayManager::getStatesAsJson() const
 {
-    // Generates JSON format expected by IoTmate backend
-    return String("{\"outlet1\":") + (_relay1State ? "true" : "false") +
-           ",\"outlet2\":" + (_relay2State ? "true" : "false") + "}";
+    // Building JSON: {"outlet1":false,"outlet2":false,"outlet3":false,"outlet4":false}
+    String json = "{";
+    for (uint8_t i = 0; i < NUM_RELAYS; i++)
+    {
+        json += "\"outlet" + String(i + 1) + "\":" + (_relaysState[i] ? "true" : "false");
+        if (i < NUM_RELAYS - 1)
+        {
+            json += ",";
+        }
+    }
+    json += "}";
+    return json;
 }

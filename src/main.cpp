@@ -2,6 +2,7 @@
 #include "wifi_manager.h"
 #include "relay_manager.h"
 #include "mqtt_manager.h"
+#include "device_identity.h"
 
 CustomWiFiManager wifiMgr;
 RelayManager relayMgr;
@@ -14,6 +15,17 @@ void setup()
   delay(3000);
 
   Serial.println("\n=== IoTmate XIAO ESP32-C3 Firmware Starting ===");
+
+  // Generate global variables with unique IDs
+  generateDeviceId();
+  generateHardwareUniqueId();
+
+  // DEVICE_ID == MAC
+  Serial.print("Device ID (MAC): ");
+  Serial.println(DEVICE_ID);
+
+  Serial.print("Hardware Secret: ");
+  Serial.println(HARDWARE_SECRET);
 
   // Initialize Relays and GPIOs
   relayMgr.begin();
