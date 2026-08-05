@@ -164,8 +164,15 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
     http.begin(backend_address);
     http.addHeader("Content-Type", "application/json");
 
-    // Construct JSON payload with device ID and hardware secret
-    String jsonBody = "{\"deviceId\":\"" + deviceId + "\", \"deviceSecret\":\"" + HARDWARE_SECRET + "\", \"name\":\"IoTmate Relay Node\"}";
+    // Construct JSON payload using modern ArduinoJson v7 JsonDocument
+    JsonDocument reqDoc;
+    reqDoc["deviceId"] = deviceId;
+    reqDoc["deviceSecret"] = HARDWARE_SECRET;
+    reqDoc["deviceType"] = static_cast<int>(DEVICE_TYPE);
+    reqDoc["outletsCount"] = NUM_OF_OUTLETS;
+
+    String jsonBody;
+    serializeJson(reqDoc, jsonBody);
 
     Serial.print("[HTTP] Sending JSON: ");
     Serial.println(jsonBody);
@@ -179,7 +186,7 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
         Serial.print("[HTTP] Response from Backend: ");
         Serial.println(response);
 
-        StaticJsonDocument<512> doc;
+        JsonDocument doc;
         DeserializationError error = deserializeJson(doc, response);
 
         if (!error)

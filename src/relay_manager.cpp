@@ -1,23 +1,25 @@
 #include "relay_manager.h"
 #include "config.h"
+#include <ArduinoJson.h>
 
 void RelayManager::begin()
 {
-    // Pin for Wifi reset
+    // Configure pin for Wi-Fi/factory reset
     pinMode(RESET_PIN, INPUT_PULLUP);
 
-    // Relays pins
+    // Initialize relay control pins as outputs
     for (uint8_t i = 0; i < NUM_RELAYS; i++)
     {
         pinMode(_relayPins[i], OUTPUT);
     }
 
+    // Apply default hardware pin states
     updateHardwarePins();
 }
 
 void RelayManager::setRelay(uint8_t relayNum, bool state)
 {
-    // Accept 1..NUM_RELAYS numbers
+    // Validate relay number range (1..NUM_RELAYS)
     if (relayNum < 1 || relayNum > NUM_RELAYS)
         return;
 
@@ -27,6 +29,7 @@ void RelayManager::setRelay(uint8_t relayNum, bool state)
 
 bool RelayManager::getRelayState(uint8_t relayNum) const
 {
+    // Validate relay number range (1..NUM_RELAYS)
     if (relayNum < 1 || relayNum > NUM_RELAYS)
         return false;
 
@@ -35,6 +38,7 @@ bool RelayManager::getRelayState(uint8_t relayNum) const
 
 void RelayManager::updateHardwarePins()
 {
+    // Apply logic state to actual GPIO pins (HIGH = active/on, LOW = inactive/off)
     for (uint8_t i = 0; i < NUM_RELAYS; i++)
     {
         digitalWrite(_relayPins[i], _relaysState[i] ? HIGH : LOW);
@@ -43,16 +47,15 @@ void RelayManager::updateHardwarePins()
 
 String RelayManager::getStatesAsJson() const
 {
-    // Building JSON: {"outlet1":false,"outlet2":false,"outlet3":false,"outlet4":false}
-    String json = "{";
+    // Build JSON dynamically: {"outlet1":false,"outlet2":false,...} matching the backend format
+    JsonDocument doc;
     for (uint8_t i = 0; i < NUM_RELAYS; i++)
     {
-        json += "\"outlet" + String(i + 1) + "\":" + (_relaysState[i] ? "true" : "false");
-        if (i < NUM_RELAYS - 1)
-        {
-            json += ",";
-        }
+        String key = "outlet" + String(i + 1);
+        doc[key] = _relaysState[i];
     }
-    json += "}";
-    return json;
+
+    String jsonOutput;
+    serializeJson(doc, jsonOutput);
+    return jsonOutput;
 }

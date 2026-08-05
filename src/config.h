@@ -2,9 +2,13 @@
 #define CONFIG_H
 
 #include <Arduino.h>
-
+#include "device_type.h"
 // Unique device identification
 extern String DEVICE_ID;
+
+// Device information for backend
+constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
+#define NUM_OF_OUTLETS 4
 
 // Backend server
 #define BACKEND_SERVER "192.168.1.69"

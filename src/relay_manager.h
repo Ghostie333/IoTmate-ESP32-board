@@ -7,16 +7,17 @@
 class RelayManager
 {
 private:
-    static const uint8_t NUM_RELAYS = 4;
+    // Use NUM_OF_OUTLETS defined in config.h
+    static const uint8_t NUM_RELAYS = NUM_OF_OUTLETS;
 
-    // Tablica mapująca indeks pętli na konkretne piny z config.h
+    // Mapping loop index to specific GPIO pins from config.h
     const uint8_t _relayPins[NUM_RELAYS] = {
         RELAY_1_PIN,
         RELAY_2_PIN,
         RELAY_3_PIN,
         RELAY_4_PIN};
 
-    // Stany dla 4 przekaźników (domyślnie false)
+    // Relay states (defaults to false)
     bool _relaysState[NUM_RELAYS] = {false, false, false, false};
 
     void updateHardwarePins();
@@ -26,7 +27,7 @@ public:
 
     void begin();
 
-    // Oczekuje numeru przekaźnika od 1 do 4 (1..NUM_RELAYS)
+    // Expects relay index from 1 to NUM_OF_OUTLETS (1..NUM_RELAYS)
     void setRelay(uint8_t relayNum, bool state);
     bool getRelayState(uint8_t relayNum) const;
 
