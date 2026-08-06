@@ -17,8 +17,8 @@ private:
         RELAY_3_PIN,
         RELAY_4_PIN};
 
-    // Relay states (defaults to false)
-    bool _relaysState[NUM_RELAYS] = {false, false, false, false};
+    // Relay states (zero-initialized to false; size follows NUM_OF_OUTLETS)
+    bool _relaysState[NUM_RELAYS] = {};
 
     void updateHardwarePins();
 

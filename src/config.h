@@ -10,15 +10,27 @@ extern String DEVICE_ID;
 constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
 #define NUM_OF_OUTLETS 4
 
-// Backend server
-#define BACKEND_SERVER "192.168.1.69"
-#define BACKEND_PORT 7070
-
-// MQTT Broker settings (Update with your Docker host IP)
+// Backend server and MQTT
+// MQTT_TLS: use TLS for the MQTT broker (port 8883). Without it, plaintext 1883.
+// BACKEND_TLS: use HTTPS for the backend (port 443). Without it, plaintext HTTP 7070.
+// MQTT_DEV_TLS: dev only - accept self-signed broker certs (setInsecure) instead of verifying via ROOT_CA.
+#ifdef MQTT_TLS
+#define MQTT_SERVER "192.168.1.69"
+#define MQTT_PORT 8883
+#else
 #define MQTT_SERVER "192.168.1.69"
 #define MQTT_PORT 1883
-#define MQTT_USER "backend_app"
-#define MQTT_PASS "BackendPassword"
+#endif
+
+#ifdef BACKEND_TLS
+#define BACKEND_SERVER "192.168.1.69"
+#define BACKEND_PORT 443
+#define BACKEND_SCHEME "https"
+#else
+#define BACKEND_SERVER "192.168.1.69"
+#define BACKEND_PORT 7070
+#define BACKEND_SCHEME "http"
+#endif
 
 // Hardware Configuration (ESP32-C3 Super Mini Pinout)
 #define RESET_PIN 0 // GPIO0 - Reset wifi button
@@ -30,5 +42,9 @@ constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
 
 // Timers
 #define HEARTBEAT_INTERVAL_MS 10000 // Send state every 10s
+#define MQTT_RETRY_DELAY_MS 5000    // Delay between connection attempts
+#define MQTT_KEEPALIVE_SEC 15       // MQTT keepalive interval
+#define MQTT_SOCKET_TIMEOUT_SEC 10  // Max blocking time for socket operations
+#define HTTP_TIMEOUT_MS 3000        // Max blocking time for HTTP requests
 
 #endif

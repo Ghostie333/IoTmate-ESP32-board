@@ -2,6 +2,7 @@
 #define MQTT_MANAGER_H
 
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include "relay_manager.h"
 
@@ -22,7 +23,13 @@ public:
     void clearCredentials();
 
 private:
-    WiFiClient _wifiClient;
+    enum class MqttState : uint8_t
+    {
+        Disconnected,
+        Connected
+    };
+
+    WiFiClientSecure _wifiClient;
     PubSubClient _mqttClient;
     RelayManager &_relayManager;
 
@@ -30,7 +37,9 @@ private:
     String _topicState;
     String _topicCommand;
 
+    MqttState _state = MqttState::Disconnected;
     unsigned long _lastHeartbeat = 0;
+    unsigned long _lastConnectAttempt = 0;
 
     void handleCommand(const String &message);
     MqttCredentials fetchCredentials(const String &deviceId);

@@ -16,16 +16,16 @@ void CustomWiFiManager::setupWiFi()
     // Max wifi power
     WiFi.setTxPower(WIFI_POWER_19_5dBm);
 
-    WiFiManager wm;
+    checkResetButtonOnBoot();
 
-    wm.setCaptivePortalEnable(true);
-    wm.setConnectTimeout(10);
-    wm.setSaveConnectTimeout(10);
-    wm.setConfigPortalTimeout(60);
+    _wm.setCaptivePortalEnable(true);
+    _wm.setConnectTimeout(10);
+    _wm.setSaveConnectTimeout(10);
+    _wm.setConfigPortalTimeout(60);
 
     Serial.println("[WiFi] Launching autoconnect...");
 
-    bool connected = wm.autoConnect("IoTmate-Board");
+    bool connected = _wm.autoConnect("IoTmate-Board");
 
     if (!connected)
     {
@@ -52,11 +52,11 @@ void CustomWiFiManager::checkResetButtonOnBoot()
         // Reset wifi settings
         _wm.resetSettings();
 
-        // Czekamy, aż użytkownik puści przycisk przed kontynuacją
-        // while (digitalRead(RESET_PIN) == LOW)
-        // {
-        //     delay(50);
-        // }
+        // Wait for user to stop pressing button
+        while (digitalRead(RESET_PIN) == LOW)
+        {
+            delay(50);
+        }
 
         Serial.println("[SYSTEM] Settings cleared. Launching Captive Portal...");
     }

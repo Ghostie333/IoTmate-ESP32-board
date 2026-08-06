@@ -4,6 +4,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include "certificates.h"
 
 MqttManager::MqttManager(RelayManager &relayMgr)
     : _mqttClient(_wifiClient), _relayManager(relayMgr) {}
@@ -15,7 +16,17 @@ void MqttManager::begin()
     _topicCommand = "devices/" + DEVICE_ID + "/command";
 
     _mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-    _mqttClient.setBufferSize(512); // WAŻNE: Wymagane dla tokenów 64-bitowych (SHA256)
+    _mqttClient.setBufferSize(512);
+    _mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC);
+    _mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC);
+
+#if defined(MQTT_TLS) && !defined(MQTT_DEV_TLS)
+    _wifiClient.setCACert(ROOT_CA); // production: verify the server certificate
+#elif defined(MQTT_TLS)
+    _wifiClient.setInsecure(); // dev only: self-signed cert, skip verification
+#else
+    _wifiClient.setInsecure(); // plaintext 1883, no TLS involved
+#endif
 
     _mqttClient.setCallback(
         [this](char *topic, byte *payload, unsigned int length)
@@ -32,18 +43,36 @@ void MqttManager::begin()
 
 void MqttManager::loop()
 {
-    if (!_mqttClient.connected())
-    {
-        reconnect();
-    }
-    _mqttClient.loop();
+    const unsigned long now = millis();
 
-    // Heartbeat Timer
-    unsigned long now = millis();
-    if (now - _lastHeartbeat > HEARTBEAT_INTERVAL_MS)
+    if (_state == MqttState::Connected)
     {
-        _lastHeartbeat = now;
-        publishState();
+        if (!_mqttClient.connected())
+        {
+            _mqttClient.loop();
+            _state = MqttState::Disconnected;
+            return;
+        }
+
+        _mqttClient.loop();
+
+        // Heartbeat timer
+        if (now - _lastHeartbeat >= HEARTBEAT_INTERVAL_MS)
+        {
+            _lastHeartbeat = now;
+            publishState();
+        }
+        return;
+    }
+
+    // Disconnected: schedule connection attempts at a fixed interval (non-blocking retry)
+    if (now - _lastConnectAttempt >= MQTT_RETRY_DELAY_MS)
+    {
+        _lastConnectAttempt = now;
+        if (reconnect())
+        {
+            _state = MqttState::Connected;
+        }
     }
 }
 
@@ -52,26 +81,22 @@ bool MqttManager::reconnect()
     if (WiFi.status() != WL_CONNECTED)
         return false;
 
-    // 1. Wczytaj poświadczenia z NVS lub wyrejestruj/pobierz z backendu
+    // 1. Load credentials from NVS or provision/register them via the backend
     MqttCredentials creds = fetchCredentials(DEVICE_ID);
 
     if (creds.user.isEmpty() || creds.pass.isEmpty())
     {
-        Serial.println("[MQTT] Brak poświadczeń. Ponowna próba za 5s...");
-        delay(5000);
+        Serial.println("[MQTT] No credentials to connect.");
         return false;
     }
 
-    Serial.printf("[MQTT] Próba połączenia do brokera jako: %s z tokenem: %s...\n",
-                  creds.user.c_str(), creds.pass.c_str());
-
     const char *lwtPayload = "{\"online\":false}";
 
-    // 2. Łączenie z brokerem
+    // 2. Connect to the broker
     bool connected = _mqttClient.connect(
-        creds.user.c_str(), // Client ID (zazwyczaj MAC/deviceId)
+        creds.user.c_str(), // Client ID (usually MAC/deviceId)
         creds.user.c_str(), // Username
-        creds.pass.c_str(), // Password (secretToken z API)
+        creds.pass.c_str(), // Password (secretToken from API)
         _topicStatus.c_str(),
         1,
         true,
@@ -79,31 +104,24 @@ bool MqttManager::reconnect()
 
     if (connected)
     {
-        Serial.println("[MQTT] Połączono pomyślnie!");
+        Serial.println("[MQTT] Connected successfully!");
         _mqttClient.publish(_topicStatus.c_str(), "{\"online\":true}", true);
         _mqttClient.subscribe(_topicCommand.c_str());
         publishState();
         return true;
     }
-    else
+
+    int state = _mqttClient.state();
+    Serial.printf("[MQTT] Connection error, rc=%d\n", state);
+
+    // rc = 5 (MQTT_CONNECT_UNAUTHORIZED)
+    if (state == 5)
     {
-        int state = _mqttClient.state();
-        Serial.printf("[MQTT] Błąd połączenia, rc=%d\n", state);
-
-        // rc = 5 (MQTT_CONNECT_UNAUTHORIZED)
-        if (state == 5)
-        {
-            Serial.println("[MQTT] Odrzucono poświadczenia (rc=5)! Czyszczenie NVS...");
-            clearCredentials();
-            delay(3000); // Dajmy czas na ustabilizowanie
-        }
-        else
-        {
-            delay(2000);
-        }
-
-        return false;
+        Serial.println("[MQTT] Credentials rejected (rc=5)! Clearing NVS and re-provisioning...");
+        clearCredentials();
     }
+
+    return false;
 }
 
 void MqttManager::publishState()
@@ -156,12 +174,14 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
     }
 
     HTTPClient http;
-    String backend_address = "http://" + String(BACKEND_SERVER) + ":" + String(BACKEND_PORT) + "/api/devices/register";
+    String backend_address = String(BACKEND_SCHEME) + "://" + String(BACKEND_SERVER) + ":" + String(BACKEND_PORT) + "/api/devices/register";
 
     Serial.print("[HTTP] Connecting to backend: ");
     Serial.println(backend_address);
 
-    http.begin(backend_address);
+    // Use the secure client so HTTPS verifies the server certificate via ROOT_CA
+    http.begin(_wifiClient, backend_address);
+    http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
     // Construct JSON payload using modern ArduinoJson v7 JsonDocument
@@ -209,19 +229,16 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
     else if (httpCode == 401) // 401 Unauthorized
     {
         Serial.println("[PROVISION] ERROR 401: Invalid deviceSecret. Clearing local credentials.");
-        clearCredentials();
-        delay(5000);
+        prefs.clear(); // prefs already open in this scope - avoid nested Preferences handle
     }
     else if (httpCode == 409) // 409 Conflict
     {
         Serial.println("[PROVISION] ERROR 409: Device conflict or invalid credentials. Clearing local credentials.");
-        clearCredentials();
-        delay(5000);
+        prefs.clear(); // prefs already open in this scope - avoid nested Preferences handle
     }
     else
     {
         Serial.printf("[HTTP] Request failed, HTTP code: %d\n", httpCode);
-        delay(5000);
     }
 
     http.end();

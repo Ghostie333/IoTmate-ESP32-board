@@ -12,7 +12,6 @@ void setup()
 {
   // Initialize Serial Debug Monitor
   Serial.begin(115200);
-  delay(3000);
 
   Serial.println("\n=== IoTmate XIAO ESP32-C3 Firmware Starting ===");
 

@@ -9,7 +9,7 @@ class CustomWiFiManager
 private:
     WiFiManager _wm;
 
-    // Sprawdza stan przycisku podczas uruchamiania
+    // Checks the reset button state during boot
     void checkResetButtonOnBoot();
 
 public:
