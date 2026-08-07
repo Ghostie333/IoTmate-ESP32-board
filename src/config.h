@@ -4,16 +4,16 @@
 #include <Arduino.h>
 #include "device_type.h"
 // Unique device identification
-extern String DEVICE_ID;
+extern String DEVICE_ID; // MAC address
 
 // Device information for backend
-constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
+constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip; // information for backend
 #define NUM_OF_OUTLETS 4
 
 // Backend server and MQTT
-// MQTT_TLS: use TLS for the MQTT broker (port 8883). Without it, plaintext 1883.
-// BACKEND_TLS: use HTTPS for the backend (port 443). Without it, plaintext HTTP 7070.
-// MQTT_DEV_TLS: dev only - accept self-signed broker certs (setInsecure) instead of verifying via ROOT_CA.
+// MQTT_TLS: use TLS for the MQTT broker (port 8883). Without it plaintext 1883
+// BACKEND_TLS: use HTTPS for the backend (port 443). Without it plaintext HTTP 7070
+// MQTT_DEV_TLS: dev only - accept self-signed broker certs (setInsecure) instead of verifying via ROOT_CA
 #ifdef MQTT_TLS
 #define MQTT_SERVER "192.168.1.69"
 #define MQTT_PORT 8883
