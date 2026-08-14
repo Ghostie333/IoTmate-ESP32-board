@@ -38,10 +38,12 @@ bool RelayManager::getRelayState(uint8_t relayNum) const
 
 void RelayManager::updateHardwarePins()
 {
-    // Apply logic state to actual GPIO pins (HIGH = active/on, LOW = inactive/off)
+    // Relay modules are active-low: LOW = relay ON, HIGH = relay OFF.
+    // The logical state (_relaysState) is kept unchanged so the JSON sent to the
+    // backend matches the physical relay position.
     for (uint8_t i = 0; i < NUM_RELAYS; i++)
     {
-        digitalWrite(_relayPins[i], _relaysState[i] ? HIGH : LOW);
+        digitalWrite(_relayPins[i], _relaysState[i] ? LOW : HIGH);
     }
 }
 

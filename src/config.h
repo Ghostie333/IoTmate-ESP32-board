@@ -15,19 +15,19 @@ constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
 // BACKEND_TLS: use HTTPS for the backend (port 443). Without it, plaintext HTTP 7070.
 // MQTT_DEV_TLS: dev only - accept self-signed broker certs (setInsecure) instead of verifying via ROOT_CA.
 #ifdef MQTT_TLS
-#define MQTT_SERVER "192.168.1.69"
+#define MQTT_SERVER "192.168.0.118"
 #define MQTT_PORT 8883
 #else
-#define MQTT_SERVER "192.168.1.69"
+#define MQTT_SERVER "192.168.0.118"
 #define MQTT_PORT 1883
 #endif
 
 #ifdef BACKEND_TLS
-#define BACKEND_SERVER "192.168.1.69"
+#define BACKEND_SERVER "192.168.0.118"
 #define BACKEND_PORT 443
 #define BACKEND_SCHEME "https"
 #else
-#define BACKEND_SERVER "192.168.1.69"
+#define BACKEND_SERVER "192.168.0.118"
 #define BACKEND_PORT 7070
 #define BACKEND_SCHEME "http"
 #endif
@@ -39,6 +39,11 @@ constexpr DeviceType DEVICE_TYPE = DeviceType::PowerStrip;
 #define RELAY_2_PIN 2 // GPIO2 - Relay 2
 #define RELAY_3_PIN 3 // GPIO3 - Relay 3
 #define RELAY_4_PIN 4 // GPIO4 - Relay 4
+
+// WiFi Manager
+#define WIFI_CONNECT_ATTEMPTS 4      // Number of attempts to connect to saved WiFi
+#define WIFI_CONNECT_TIMEOUT_MS 10000 // Max time per connection attempt
+#define WIFI_PORTAL_SSID "IoTmate-Board" // AP SSID for the config portal
 
 // Timers
 #define HEARTBEAT_INTERVAL_MS 10000 // Send state every 10s

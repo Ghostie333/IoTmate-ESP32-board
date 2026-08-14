@@ -29,7 +29,8 @@ private:
         Connected
     };
 
-    WiFiClientSecure _wifiClient;
+    WiFiClientSecure _wifiClient; // secured MQTT connection to the broker
+    WiFiClient _backendClient;    // plaintext connection to the backend API (dev, http://)
     PubSubClient _mqttClient;
     RelayManager &_relayManager;
 

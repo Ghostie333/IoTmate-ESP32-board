@@ -90,7 +90,9 @@ bool MqttManager::reconnect()
         return false;
     }
 
-    const char *lwtPayload = "{\"online\":false}";
+    // Static buffer: PubSubClient only stores a POINTER to the will payload,
+    // so it must outlive the connection lifetime.
+    static const char lwtPayload[] = "{\"online\":false}";
 
     // 2. Connect to the broker
     bool connected = _mqttClient.connect(
@@ -179,8 +181,13 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
     Serial.print("[HTTP] Connecting to backend: ");
     Serial.println(backend_address);
 
-    // Use the secure client so HTTPS verifies the server certificate via ROOT_CA
+    // Use a plaintext client for the dev backend (http://) and the secure client
+    // for production (https://, BACKEND_TLS) - never mix them.
+#if defined(BACKEND_TLS)
     http.begin(_wifiClient, backend_address);
+#else
+    http.begin(_backendClient, backend_address);
+#endif
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
