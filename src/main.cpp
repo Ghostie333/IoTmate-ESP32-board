@@ -29,9 +29,6 @@ void setup()
   Serial.print("Device ID (MAC): ");
   Serial.println(DEVICE_ID);
 
-  Serial.print("Hardware Secret: ");
-  Serial.println(HARDWARE_SECRET);
-
   // Initialize Relays and GPIOs
   relayMgr.begin();
 
@@ -45,5 +42,6 @@ void setup()
 void loop()
 {
   // Process background MQTT tasks and handle reconnections
+  wifiMgr.loop();
   mqttMgr.loop();
 }

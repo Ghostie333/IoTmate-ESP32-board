@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
+#include "config.h"
 #include "relay_manager.h"
 
 struct MqttCredentials
@@ -15,12 +16,10 @@ struct MqttCredentials
 class MqttManager
 {
 public:
-    MqttManager(RelayManager &relayMgr);
+    explicit MqttManager(RelayManager &relayMgr);
+
     void begin();
     void loop();
-    bool reconnect();
-    void publishState();
-    void clearCredentials();
 
 private:
     enum class MqttState : uint8_t
@@ -29,8 +28,8 @@ private:
         Connected
     };
 
-    WiFiClientSecure _wifiClient; // secured MQTT connection to the broker
-    WiFiClient _backendClient;    // plaintext connection to the backend API (dev, http://)
+    WiFiClientSecure _wifiClient;
+    WiFiClient _backendClient;
     PubSubClient _mqttClient;
     RelayManager &_relayManager;
 
@@ -41,9 +40,13 @@ private:
     MqttState _state = MqttState::Disconnected;
     unsigned long _lastHeartbeat = 0;
     unsigned long _lastConnectAttempt = 0;
+    unsigned long _retryDelayMs = MQTT_RETRY_DELAY_MS;
+    bool _forceCredentialRefresh = false;
 
+    bool reconnect();
+    void publishState();
     void handleCommand(const String &message);
-    MqttCredentials fetchCredentials(const String &deviceId);
+    MqttCredentials fetchCredentials(const String &deviceId, bool forceRefresh);
 };
 
-#endif // MQTT_MANAGER_H
+#endif

@@ -20,24 +20,25 @@ void MqttManager::begin()
     _mqttClient.setKeepAlive(MQTT_KEEPALIVE_SEC);
     _mqttClient.setSocketTimeout(MQTT_SOCKET_TIMEOUT_SEC);
 
-#if defined(MQTT_TLS) && !defined(MQTT_DEV_TLS)
-    _wifiClient.setCACert(ROOT_CA); // production: verify the server certificate
-#elif defined(MQTT_TLS)
-    _wifiClient.setInsecure(); // dev only: self-signed cert, skip verification
+#ifndef MQTT_DEV_TLS
+    _wifiClient.setCACert(ROOT_CA);
 #else
-    _wifiClient.setInsecure(); // plaintext 1883, no TLS involved
+    _wifiClient.setInsecure();
 #endif
 
     _mqttClient.setCallback(
         [this](char *topic, byte *payload, unsigned int length)
         {
-            String message = "";
+            String message;
+            message.reserve(length);
+
             for (unsigned int i = 0; i < length; i++)
             {
-                message += (char)payload[i];
+                message += static_cast<char>(payload[i]);
             }
+
             Serial.printf("[MQTT] Received on [%s]: %s\n", topic, message.c_str());
-            this->handleCommand(message);
+            handleCommand(message);
         });
 }
 
@@ -56,23 +57,33 @@ void MqttManager::loop()
 
         _mqttClient.loop();
 
-        // Heartbeat timer
         if (now - _lastHeartbeat >= HEARTBEAT_INTERVAL_MS)
         {
-            _lastHeartbeat = now;
             publishState();
         }
         return;
     }
 
-    // Disconnected: schedule connection attempts at a fixed interval (non-blocking retry)
-    if (now - _lastConnectAttempt >= MQTT_RETRY_DELAY_MS)
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        _retryDelayMs = MQTT_RETRY_DELAY_MS;
+        return;
+    }
+
+    if (now - _lastConnectAttempt >= _retryDelayMs)
     {
         _lastConnectAttempt = now;
+
         if (reconnect())
         {
             _state = MqttState::Connected;
+            _retryDelayMs = MQTT_RETRY_DELAY_MS;
+            return;
         }
+
+        const unsigned long nextDelay = _retryDelayMs * 2;
+        _retryDelayMs = nextDelay > MQTT_RETRY_MAX_DELAY_MS ? MQTT_RETRY_MAX_DELAY_MS : nextDelay;
+        _retryDelayMs += random(0, 1000);
     }
 }
 
@@ -81,8 +92,8 @@ bool MqttManager::reconnect()
     if (WiFi.status() != WL_CONNECTED)
         return false;
 
-    // 1. Load credentials from NVS or provision/register them via the backend
-    MqttCredentials creds = fetchCredentials(DEVICE_ID);
+    const MqttCredentials creds = fetchCredentials(DEVICE_ID, _forceCredentialRefresh);
+    _forceCredentialRefresh = false;
 
     if (creds.user.isEmpty() || creds.pass.isEmpty())
     {
@@ -90,15 +101,12 @@ bool MqttManager::reconnect()
         return false;
     }
 
-    // Static buffer: PubSubClient only stores a POINTER to the will payload,
-    // so it must outlive the connection lifetime.
     static const char lwtPayload[] = "{\"online\":false}";
 
-    // 2. Connect to the broker
-    bool connected = _mqttClient.connect(
-        creds.user.c_str(), // Client ID (usually MAC/deviceId)
-        creds.user.c_str(), // Username
-        creds.pass.c_str(), // Password (secretToken from API)
+    const bool connected = _mqttClient.connect(
+        creds.user.c_str(),
+        creds.user.c_str(),
+        creds.pass.c_str(),
         _topicStatus.c_str(),
         1,
         true,
@@ -108,19 +116,18 @@ bool MqttManager::reconnect()
     {
         Serial.println("[MQTT] Connected successfully!");
         _mqttClient.publish(_topicStatus.c_str(), "{\"online\":true}", true);
-        _mqttClient.subscribe(_topicCommand.c_str());
+        _mqttClient.subscribe(_topicCommand.c_str(), 1);
         publishState();
         return true;
     }
 
-    int state = _mqttClient.state();
+    const int state = _mqttClient.state();
     Serial.printf("[MQTT] Connection error, rc=%d\n", state);
 
-    // rc = 5 (MQTT_CONNECT_UNAUTHORIZED)
     if (state == 5)
     {
-        Serial.println("[MQTT] Credentials rejected (rc=5)! Clearing NVS and re-provisioning...");
-        clearCredentials();
+        Serial.println("[MQTT] Credentials rejected, refreshing registration on next attempt.");
+        _forceCredentialRefresh = true;
     }
 
     return false;
@@ -128,47 +135,66 @@ bool MqttManager::reconnect()
 
 void MqttManager::publishState()
 {
-    String stateJson = _relayManager.getStatesAsJson();
+    _lastHeartbeat = millis();
 
-    // Publish telemetry state with Retain = true
-    _mqttClient.publish(_topicState.c_str(), stateJson.c_str(), true);
-    Serial.printf("[MQTT] Published State: %s\n", stateJson.c_str());
+    const String stateJson = _relayManager.getStatesAsJson();
+    if (_mqttClient.publish(_topicState.c_str(), stateJson.c_str(), true))
+    {
+        Serial.printf("[MQTT] Published State: %s\n", stateJson.c_str());
+    }
+    else
+    {
+        Serial.println("[MQTT] Failed to publish state.");
+    }
 }
 
 void MqttManager::handleCommand(const String &message)
 {
-    bool requestedState = false;
-    uint8_t relayNum = 0;
+    bool requestedState;
+    String relayPart;
 
     if (message.startsWith("ON_"))
     {
         requestedState = true;
-        relayNum = message.substring(3).toInt();
+        relayPart = message.substring(3);
     }
     else if (message.startsWith("OFF_"))
     {
         requestedState = false;
-        relayNum = message.substring(4).toInt();
+        relayPart = message.substring(4);
     }
     else
     {
-        return; // Invalid command format
+        Serial.printf("[MQTT] Invalid command: %s\n", message.c_str());
+        return;
+    }
+
+    if (relayPart.length() != 1 || !isDigit(relayPart[0]))
+    {
+        Serial.printf("[MQTT] Invalid relay number in command: %s\n", message.c_str());
+        return;
+    }
+
+    const uint8_t relayNum = static_cast<uint8_t>(relayPart[0] - '0');
+    if (relayNum < 1 || relayNum > RelayManager::RelayCount)
+    {
+        Serial.printf("[MQTT] Relay out of range: %u\n", relayNum);
+        return;
     }
 
     _relayManager.setRelay(relayNum, requestedState);
     publishState();
 }
 
-MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
+MqttCredentials MqttManager::fetchCredentials(const String &deviceId, bool forceRefresh)
 {
     Preferences prefs;
     prefs.begin("mqtt_config", false);
 
-    String savedUser = prefs.getString("user", "");
-    String savedPass = prefs.getString("pass", "");
+    const String savedUser = prefs.getString("user", "");
+    const String savedPass = prefs.getString("pass", "");
 
-    // Return stored credentials if they exist
-    if (savedUser.length() > 0 && savedPass.length() > 0)
+    if (!forceRefresh && savedUser.length() > 0 && savedPass.length() > 0)
     {
         Serial.println("[PROVISION] Loaded MQTT credentials from NVS.");
         prefs.end();
@@ -176,72 +202,56 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
     }
 
     HTTPClient http;
-    String backend_address = String(BACKEND_SCHEME) + "://" + String(BACKEND_SERVER) + ":" + String(BACKEND_PORT) + "/api/devices/register";
+    const String backendAddress = String(BACKEND_SCHEME) + "://" + String(BACKEND_SERVER) + ":" + String(BACKEND_PORT) + "/api/devices/register";
 
     Serial.print("[HTTP] Connecting to backend: ");
-    Serial.println(backend_address);
+    Serial.println(backendAddress);
 
-    // Use a plaintext client for the dev backend (http://) and the secure client
-    // for production (https://, BACKEND_TLS) - never mix them.
 #if defined(BACKEND_TLS)
-    http.begin(_wifiClient, backend_address);
+    http.begin(_wifiClient, backendAddress);
 #else
-    http.begin(_backendClient, backend_address);
+    http.begin(_backendClient, backendAddress);
 #endif
     http.setTimeout(HTTP_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
-    // Construct JSON payload using modern ArduinoJson v7 JsonDocument
-    JsonDocument reqDoc;
-    reqDoc["deviceId"] = deviceId;
-    reqDoc["deviceSecret"] = HARDWARE_SECRET;
-    reqDoc["deviceType"] = static_cast<int>(DEVICE_TYPE);
-    reqDoc["outletsCount"] = NUM_OF_OUTLETS;
+    JsonDocument request;
+    request["deviceId"] = deviceId;
+    request["deviceSecret"] = HARDWARE_SECRET;
+    request["deviceType"] = static_cast<int>(DEVICE_TYPE);
+    request["outletsCount"] = NUM_OF_OUTLETS;
 
-    String jsonBody;
-    serializeJson(reqDoc, jsonBody);
+    String body;
+    serializeJson(request, body);
 
-    Serial.print("[HTTP] Sending JSON: ");
-    Serial.println(jsonBody);
+    const int httpCode = http.POST(body);
 
-    int httpCode = http.POST(jsonBody);
-    MqttCredentials creds = {"", ""};
-
-    if (httpCode == HTTP_CODE_OK) // 200 OK
+    if (httpCode == HTTP_CODE_OK)
     {
-        String response = http.getString();
-        Serial.print("[HTTP] Response from Backend: ");
-        Serial.println(response);
-
+        const String response = http.getString();
         JsonDocument doc;
-        DeserializationError error = deserializeJson(doc, response);
 
-        if (!error)
+        if (!deserializeJson(doc, response))
         {
-            String user = doc["deviceId"].as<String>();
-            String pass = doc["secretToken"].as<String>();
+            const String user = doc["deviceId"].as<String>();
+            const String pass = doc["secretToken"].as<String>();
 
             if (user.length() > 0 && pass.length() > 0)
             {
-                creds.user = user;
-                creds.pass = pass;
-
-                // Save new valid credentials to NVS
-                prefs.putString("user", creds.user);
-                prefs.putString("pass", creds.pass);
+                prefs.putString("user", user);
+                prefs.putString("pass", pass);
+                http.end();
+                prefs.end();
                 Serial.println("[PROVISION] Saved new MQTT credentials to NVS.");
+                return {user, pass};
             }
         }
+
+        Serial.println("[PROVISION] Registration response was invalid.");
     }
-    else if (httpCode == 401) // 401 Unauthorized
+    else if (httpCode == 401)
     {
-        Serial.println("[PROVISION] ERROR 401: Invalid deviceSecret. Clearing local credentials.");
-        prefs.clear(); // prefs already open in this scope - avoid nested Preferences handle
-    }
-    else if (httpCode == 409) // 409 Conflict
-    {
-        Serial.println("[PROVISION] ERROR 409: Device conflict or invalid credentials. Clearing local credentials.");
-        prefs.clear(); // prefs already open in this scope - avoid nested Preferences handle
+        Serial.println("[PROVISION] Registration rejected: invalid device secret.");
     }
     else
     {
@@ -250,14 +260,5 @@ MqttCredentials MqttManager::fetchCredentials(const String &deviceId)
 
     http.end();
     prefs.end();
-    return creds;
-}
-
-void MqttManager::clearCredentials()
-{
-    Preferences prefs;
-    prefs.begin("mqtt_config", false);
-    prefs.clear();
-    prefs.end();
-    Serial.println("[NVS] MQTT credentials cleared successfully.");
+    return {savedUser, savedPass};
 }
